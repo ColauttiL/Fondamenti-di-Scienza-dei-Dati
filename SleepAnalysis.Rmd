@@ -1,0 +1,414 @@
+---
+title: "Analisi del Sonno"
+subtitle: "Esame di Fondamenti di Scienza dei Dati"
+author: "Colautti Luisa - 157605 - 12 settembre 2023"
+output: 
+ ioslides_presentation:
+   css: ./style.css
+   incremental: TRUE
+   editor_options:
+      chunk_output_type: inline
+---
+
+```{css, echo=FALSE}
+slides > slide {
+overflow-y: auto !important;
+}
+```
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache = TRUE, echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r include=FALSE}
+
+# librerie per creare e manipolare grafici e dataset
+library(readr)
+library(dplyr)    # per manipolare i dati
+library(tidyr)    # per modificare il dataset
+library(ggplot2)    # per creare grafici
+library(GGally)    # per usare ggpairs
+library(gridExtra)    # per affiancare grafici
+library(tidyverse)
+library(RColorBrewer)    # per palette di colore
+library(lubridate)    # per lavorare con date
+library(scales)    # per modificare le scale dei grafici
+# per integrare modelli come decision tree, naive Bayes
+library(modelr)    
+library(caTools)
+library(rpart)
+library(cluster)
+library(maptree)
+library(e1071)    # Naive Bayes
+# per la confusion matrix
+library(lattice)
+library(caret)
+
+# dataset
+sleep_ds = read.csv("C:/Users/colau/OneDrive/Desktop/sleep_efficiency.csv")
+
+View(sleep_ds)
+
+id = sleep_ds$ID 
+età = sleep_ds$Age
+genere = sleep_ds$Gender
+bedtime = sleep_ds$Bedtime
+wakeup = sleep_ds$Wakeup_time
+durata = sleep_ds$Sleep_duration
+qualità = as.integer(sleep_ds$Sleep_efficiency*100)
+rem = sleep_ds$REM_sleep._percentage
+profondo = sleep_ds$Deep_sleep_percentage
+leggero = sleep_ds$Light_sleep_percentage
+risvegli = sleep_ds$Awakenings
+caffeina = sleep_ds$Caffeine_consumption
+alcol = sleep_ds$Alcohol_consumption
+fumo = sleep_ds$Smoking_status
+esercizio = sleep_ds$Exercise_frequency
+
+# matrice con le percentuali di fasi del sonno
+M = matrix(data = rem, nrow = 1, byrow = TRUE)
+M = rbind(M, profondo)
+M = rbind(M, leggero)
+```
+
+## Introduzione
+
+Un buon sonno è uno degli elementi indispensabili per la salute fisica e mentale delle persone. Sorge quindi spontaneo chiedersi quali siano i parametri che influenzano maggiormente la qualità del sonno nella vita di tutti i giorni.
+L'analisi svolta riguarda dunque:
+
+
+>- Influenza di età e genere
+>- Influenza della caffeina
+>- Effetto dello stile di vita su durata e qualità
+>- Possibili cause dei risvegli notturni
+>- Influenza delle fasi sonno
+>- Conseguenze dell'ora di coricamento
+>- Modello basato sull'efficienza
+>- Conclusioni
+
+
+## Dataset
+
+[Sleep Efficiency Dataset](https://www.kaggle.com/datasets/equilibriumm/sleep-efficiency)
+
+Il dataset utilizzato contiene informazioni relative agli schemi del sonno di circa 450 soggetti. 
+I parametri forniti sono: ID, età, genere, ora di coricamento, ora di risveglio, durata del sonno in ore, **efficienza del sonno** (ovvero la percentuale di tempo effettivamente dormito), percentuali delle fasi del sonno (REM, profondo e leggero), numero di risvegli notturni, consumo di alcol (in bicchieri) e caffeina (in mg), stato di fumatore e frequenza di esercizio fisico settimanale.
+
+L'efficienza verrà sfruttata come parametro per la qualità del sonno.
+
+
+## Influenza di età e genere
+
+*Genere* ed *età* influiscono sulla **durata** e sulla **qualità** del sonno?
+
+```{r echo=FALSE}
+
+plot1 <- ggplot(data = sleep_ds, mapping = aes(x = età, y = durata, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot2 <- ggplot(data = sleep_ds, mapping = aes(x = età, y = qualità, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+ grid.arrange(plot1, plot2, ncol = 2)
+
+```
+
+>- Non sembrano esserci correlazioni significative con la **durata**.
+>- La **qualità** raggiunge un picco in corrispondenza dei 50-55 anni per gli uomini e dei 30 e 50 circa per le donne (con un lieve calo in corrispondenza dei 40 anni).
+
+
+## Influenza della caffeina
+
+La quantità di *caffeina* (mg) influenza **durata** e **qualità** del sonno?
+
+```{r echo=FALSE}
+
+plot1 <- ggplot(data = sleep_ds, mapping = aes(x = caffeina, y = durata, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot2 <- ggplot(data = sleep_ds, mapping = aes(x = caffeina, y = qualità, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+grid.arrange(plot1, plot2, ncol=2)
+
+```
+
+>- La durata non sembra avere correlazioni con la caffeina
+>- La qualità è particolarmente ridotta per le donne che assumomo 50mg di caffeina, probabilmente è un risultato casuale
+
+
+## Stile di vita e quantità di sonno
+
+Consideriamo il numero di risvegli, l'assunzione di alcol, la frequenza di esercizio e se il soggetto è un fumatore o meno
+
+```{r echo = FALSE}
+
+plot1 <- ggplot(data = sleep_ds, mapping = aes(x = risvegli, y = durata, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5")) 
+
+plot2 <- ggplot(data = sleep_ds, mapping = aes(x = alcol, y = durata, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot3 <- ggplot(data = sleep_ds, mapping = aes(x = esercizio, y = durata, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot4 <- ggplot(data = sleep_ds) +
+  geom_bar(mapping = aes(x = durata, fill = fumo), position = "fill") +
+  scale_fill_manual(values = c("#2366ac", "#b32c2b")) +
+  theme(panel.background=element_rect(fill="#FFEFD5")) +
+  coord_flip() +
+scale_y_continuous(labels = scales::percent)
+
+plot5 <- ggplot(data = sleep_ds) +
+  geom_bar(mapping = aes(x = durata, fill = fumo), position = "dodge") +
+  scale_fill_manual(values = c("#2366ac", "#b32c2b")) +
+  theme(panel.background=element_rect(fill="#FFEFD5")) +
+  coord_flip() 
+
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+
+```
+
+Non si notano particolari correlazioni, probabilmente perché la quantità è influenzata da orari di lavoro, scuola o altri
+
+
+## Stile di vita e qualità del sonno
+
+Consideriamo gli stessi parametri per la **qualità** del sonno
+
+```{r echo = FALSE}
+
+plot1 <- ggplot(data = sleep_ds, mapping = aes(x = risvegli, y = qualità, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot2 <- ggplot(data = sleep_ds, mapping = aes(x = alcol, y = qualità, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot3 <- ggplot(data = sleep_ds, mapping = aes(x = esercizio, y = qualità, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot4 <- ggplot(data = sleep_ds) +
+  geom_bar(mapping = aes(x = qualità, fill = fumo), position = "fill") +
+  scale_fill_manual(values = c("#2366ac", "#b32c2b")) +
+  theme(panel.background=element_rect(fill="#FFEFD5")) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::percent)
+
+grid.arrange(plot1, plot2, plot3, plot4, ncol = 2)
+```
+
+Una maggiore qualità del sonno è riscontrata in individui che:
+
+>- Hanno pochi risvegli notturni
+>- Non assumono alcol 
+>- Svolgono spesso esercizio fisico
+>- Non fumano
+
+
+## Cause dei risvegli
+
+Lo stile di vita influenza anche il **numero di risvegli**?
+Consideriamo l'età, l'assunzione di alcol, la frequenza di esercizio e se il soggetto è un fumatore o meno
+
+```{r echo=FALSE}
+
+plot1 <- ggplot(data = sleep_ds, mapping = aes(x = età, y = risvegli, color = genere)) +
+  geom_point() + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot2 <- ggplot(data = sleep_ds, mapping = aes(x = alcol, y = risvegli)) + 
+  geom_point(aes(color = genere)) + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot3 <- ggplot(data = sleep_ds, mapping = aes(x = esercizio, y = risvegli)) + 
+  geom_point(aes(color = genere)) + 
+  geom_smooth(se = FALSE) +
+  scale_color_manual(values = c("#b32c2b", "#2366ac")) +
+  theme(panel.background=element_rect(fill="#FFEFD5"))
+
+plot4 <- ggplot(data = sleep_ds) +
+  geom_bar(mapping = aes(x = risvegli, fill = fumo), position = "fill") +
+  scale_fill_manual(values = c("#2366ac", "#b32c2b")) +
+  theme(panel.background=element_rect(fill="#FFEFD5")) +
+  scale_y_continuous(labels = scales::percent) +
+  coord_flip()
+
+grid.arrange(plot1, plot2, plot3, plot4, nrow=2, ncol = 2)
+```
+
+La quantità di risvegli risulta:
+
+>- Maggiore nei soggetti fra i 40 e i 50 anni 
+>- Maggiore in chi assume alcol
+>- Minore in chi svolge esercizio fisico regolare
+>- Indipendente dal fumo
+
+
+## Influenza delle fasi sonno
+
+Il sonno è diviso in **REM** , sonno **profondo** e sonno **leggero**
+
+```{r echo=FALSE}
+
+panel.hist <- function(x, ...)
+{
+    usr <- par("usr")
+    par(usr = c(usr[1:2], 0, 1.5) )
+    h <- hist(x, plot = FALSE)
+    breaks <- h$breaks; nB <- length(breaks)
+    y <- h$counts; y <- y/max(y)
+    rect(breaks[-nB], 0, breaks[-1], y, col = "#b32c2b")
+}
+
+  pairs(sleep_ds[7:10],    
+        panel = panel.smooth,  
+        main = "Relazione fra Fasi del Sonno e Qualità",      
+        diag.panel = panel.hist,
+        pch = 20,
+        col = "#2366ac")    
+  
+```
+
+Si evidenzia che la **qualità** del sonno è:
+
+>- Indipendente dal sonno *REM* 
+>- Direttamente proporzionale alla quantità di sonno *pesante*
+>- Inversamente proporzionale alla quantità di sonno *leggero*
+
+Inoltre, la quantità di sonno pesante e leggero sono in relazione tra loro ma indipendenti dal sonno REM.
+
+
+## Influenza dell'orario di coricamento
+
+```{r echo=FALSE}
+
+# All'interno del dataset, Bedtime delle stringhe di tipo <"data" "ora">. Creo dunque un dataset in cui data e ora occupano colonne diverse
+
+sleep_bt <- separate(
+  sleep_ds,            
+  Bedtime,                    # colonna da dividere
+  into = c("bedtime_date", "bedtime_time"),     # colonne da creare
+  sep = " ",
+  remove = TRUE,
+  convert = FALSE,        # non cambia il formato
+  )
+
+ggplot(sleep_bt, aes(x=bedtime_time, y=qualità, fill=bedtime_time)) +
+  geom_boxplot() +
+  scale_fill_brewer(palette="RdBu") +
+  theme(panel.background=element_rect(fill="#FFEFD5")) +
+  stat_summary(fun.y=mean, geom="point", shape=4,
+    aes(group = 1),
+    col = "black") +
+  scale_x_discrete(
+    name = "Ora coricamento", 
+    limits = c("21:00:00", "21:30:00", "22:00:00", "22:30:00", "23:00:00", "00:00:00", "00:30:00", "01:00:00", "01:30:00", "02:00:00", "02:30:00")) 
+
+```
+
+Non si evidenziano variazioni significative; indicativamente sembra:
+
+>- Preferibile andare a dormire fra le 22 e mezzanotte 
+>- Sconsigliata la fascia oraria fra l'1 e le 3 di notte.
+
+
+## Modello: Albero di Decisione
+
+Il modello prende in considerazione l'**efficienza** del sonno divisa in intervalli tali da restituire valori compresi fra 5 e 9
+
+```{r echo=FALSE}
+
+#divido l'efficienza in intervalli
+sleep_ds1 <- mutate(sleep_ds, Sleep_efficiency = as.integer((Sleep_efficiency*10))%%10)
+
+# elimino l'ID per overfitting
+# elimino bedtime e wakeup time per il formato
+# elimino light_sleep in quanto ridondante con il deep_sleep
+sleep_ds2 = subset(sleep_ds1, select = -c(ID, Bedtime, Wakeup_time, Light_sleep_percentage))
+sleep_ds2 <- na.omit(sleep_ds2)
+
+#make this example reproducible
+set.seed(17)
+
+#use 70% of dataset as training set and 30% as test set
+split <- sample.split(sleep_ds2, SplitRatio = 0.7)
+train_cl <- subset(sleep_ds2, split == "TRUE")
+test_cl <- subset(sleep_ds2, split == "FALSE")
+
+# creation of an object 'model' using rpart function
+decision.tree = rpart(Sleep_efficiency ~ ., data = train_cl, method = 'class')
+draw.tree(decision.tree, cex=0.8)
+
+# variabile che contiene le predizioni
+dt_pred <- predict(decision.tree, test_cl, type = "class")
+
+# Confusion Matrix
+dt_cm <- table(test_cl$Sleep_efficiency, dt_pred)
+
+# Model Evaluation
+confusionMatrix(dt_cm, positive = "9")
+```
+
+```{r echo=FALSE, include= FALSE}
+## Modello | Naive Bayes - efficienza
+
+# la valutazione del modello restituisce risultati analoghi a quelli dell'albero di decisione. Tra i due ho scelto di mantenere l'albero di decisione.
+
+nb <- naiveBayes(Sleep_efficiency ~ ., data = train_cl)
+nb
+
+# Predicting on test data
+nb_pred <- predict(nb, newdata = test_cl)
+
+# Confusion Matrix
+nb_cm <- table(test_cl$Sleep_efficiency, nb_pred)
+nb_cm
+
+# Model Evaluation
+confusionMatrix(nb_cm, positive = "9")
+
+```
+
+## Conclusioni
+
+>- Genere ed età non influenzano la quantità di sonno ma la qualità si (marginalmente)
+>- La caffeina non sembra avere correlazioni con durata e qualità
+>- La quantità di sonno non è influenzata dallo stile di vita
+>- La qualità del sonno è fortemente influenzata dallo stile di vita
+>- L'esercizio fisico è il modo migliore per ridurre il numero di risvegli
+>- La qualità del sonno è proporzionale alle percentuali di sonno pesante e leggero ma indipendente dal rem
+>- L'ora di coricamento ha influenza marginale
